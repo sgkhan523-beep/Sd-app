@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IFFCO S&amp;D</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#1d4ed8">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="IFFCO S&D"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="apple-touch-icon.png"><link rel="icon" href="icon-192.png">
+<style>
+:root{--bg:#f3f5f8;--surface:#fff;--ink:#0f2238;--muted:#5b6b7c;--line:#dce2e9;--accent:#1d4ed8;--danger:#b3261e}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1620;--surface:#16222f;--ink:#eaf0f6;--muted:#9fb0c2;--line:#2a3a4b;--accent:#6c9bff;--danger:#ff8a80}}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.box{max-width:360px;margin:0 auto;padding:12vh 20px 20px;text-align:center}
+h1{font-size:26px;margin:0 0 4px}p{color:var(--muted);margin:6px 0 18px;font-size:14px}
+input{width:100%;box-sizing:border-box;padding:13px;border:1px solid var(--line);border-radius:12px;font-size:16px;background:var(--surface);color:var(--ink);text-align:center}
+button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:99px;background:var(--accent);color:#fff;font-size:16px;font-weight:700}
+#err{color:var(--danger);min-height:20px;margin-top:10px;font-size:14px;white-space:pre-wrap}#msg{color:var(--muted);font-size:14px;min-height:20px;margin-top:10px}
+</style></head><body>
+<div class="box"><h1>IFFCO S&amp;D</h1><p id="sub">Loading...</p>
+<form id="f" hidden autocomplete="off"><input id="pw" type="password" placeholder="Team password" autocomplete="current-password"><button id="go" type="submit">Open</button></form>
+<div id="msg"></div><div id="err"></div></div>
+<script>
+(function(){
+var $=function(s){return document.querySelector(s)},TOUT=5000;
+if("serviceWorker" in navigator)window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})});
+function ft(url,ms){return new Promise(function(ok,no){var c=new AbortController(),t=setTimeout(function(){c.abort();no(new Error("timeout"))},ms);
+ fetch(url,{cache:"no-store",signal:c.signal}).then(function(r){clearTimeout(t);if(!r.ok)no(new Error("http "+r.status));else ok(r)},function(e){clearTimeout(t);no(e)})})}
+async function getFiles(){var cache=null,ver=null,stored=null;try{cache=await caches.open("iffco-data")}catch(e){}
+ try{stored=localStorage.getItem("iffco_ver")}catch(e){}
+ try{ver=await (await ft("ver.json?t="+Date.now(),TOUT)).json()}catch(e){}
+ var enc=cache&&await cache.match("data.enc"),app=cache&&await cache.match("app.html");
+ if(ver&&(String(ver.v)!==stored||!enc||!app)){
+  $("#msg").textContent="Getting the latest data...";
+  try{var r1=await ft("data.enc?v="+ver.v,60000),r2=await ft("app.html?v="+ver.v,60000);
+   if(cache){await cache.put("data.enc",r1.clone());await cache.put("app.html",r2.clone())}
+   try{localStorage.setItem("iffco_ver",String(ver.v))}catch(e){}
+   return{enc:await r1.arrayBuffer(),app:await r2.text(),fresh:true}}catch(e){if(!(enc&&app))throw new Error("Could not download. Check your internet and try again.")}}
+ if(enc&&app)return{enc:await enc.arrayBuffer(),app:await app.text(),fresh:false};
+ throw new Error("No data on this phone yet. Open the app once with internet.")}
+async function decrypt(buf,pw){var u=new Uint8Array(buf);if(u.length<45||String.fromCharCode(u[0],u[1],u[2],u[3])!=="IFC1")throw new Error("bad");
+ var salt=u.slice(4,20),iv=u.slice(20,32),ct=u.slice(32),km=await crypto.subtle.importKey("raw",new TextEncoder().encode(pw),"PBKDF2",false,["deriveKey"]),
+ key=await crypto.subtle.deriveKey({name:"PBKDF2",salt:salt,iterations:200000,hash:"SHA-256"},km,{name:"AES-GCM",length:256},false,["decrypt"]),pt;
+ try{pt=await crypto.subtle.decrypt({name:"AES-GCM",iv:iv},key,ct)}catch(e){var er=new Error("Wrong password");er.wrong=1;throw er}
+ var s=new Blob([pt]).stream().pipeThrough(new DecompressionStream("gzip"));return JSON.parse(await new Response(s).text())}
+function start(app,P){var T=window.__T={D:P.D,P:P.P,STORES:P.stores,STOCK:{},PREV:{},WH:[],STAMP:"",low:P.low,log:P.log,pub:P.pub,exp:P.exp,boss:P.boss||"",np:P.np||0,promos:P.promos||[],sos:P.sos||null},st=P.stock;
+ if(st){T.WH=st.wh;T.STAMP=st.stamp;for(var k in st.s)T.STOCK["@"+k]=st.s[k];var pv=st.prev;if(pv&&JSON.stringify(pv.wh)===JSON.stringify(st.wh))for(var k2 in pv.s)T.PREV["@"+k2]=pv.s[k2]}
+ document.open();document.write(app);document.close()}
+var files=null,busy=false;
+if(typeof DecompressionStream==="undefined"||!window.crypto||!crypto.subtle){$("#sub").textContent="Phone not supported";$("#err").textContent="Please update your phone software (iPhone: iOS 16.4 or newer, Android: update Chrome) and open the link again.";return}
+async function attempt(pw,auto){if(busy)return;busy=true;$("#err").textContent="";$("#go").disabled=true;
+ try{if(!files)files=await getFiles();$("#msg").textContent="Opening...";var P=await decrypt(files.enc,pw);
+  if(Date.now()>P.exp){$("#f").hidden=true;$("#sub").textContent="This data has expired";$("#msg").textContent="";$("#err").textContent="The 30 days are over. Ask for the new update, then open the app again with internet.";try{localStorage.removeItem("iffco_ver")}catch(e){}busy=false;files=null;return}
+  try{localStorage.setItem("iffco_pw",pw)}catch(e){}start(files.app,P)}
+ catch(e){busy=false;$("#go").disabled=false;$("#msg").textContent="";$("#sub").textContent="Enter the team password";$("#f").hidden=false;
+  if(e.wrong){try{localStorage.removeItem("iffco_pw")}catch(x){}if(files&&!files.fresh){try{localStorage.removeItem("iffco_ver")}catch(x){}files=null}$("#err").textContent=auto?"":"Wrong password. Try again."}
+  else if(e.message==="bad")$("#err").textContent="The data file is not valid. Ask for the update again.";
+  else $("#err").textContent=e.message||"Something went wrong";
+  setTimeout(function(){var p=$("#pw");if(p&&!$("#f").hidden)p.focus()},50)}}
+$("#f").addEventListener("submit",function(e){e.preventDefault();var v=$("#pw").value;if(v)attempt(v,false)});
+var saved=null;try{saved=localStorage.getItem("iffco_pw")}catch(e){}
+if(saved)attempt(saved,true);else{$("#sub").textContent="Enter the team password";$("#f").hidden=false;setTimeout(function(){$("#pw").focus()},50);getFiles().then(function(f){files=f;$("#msg").textContent=""}).catch(function(e){$("#err").textContent=e.message})}
+})();
+</script></body></html>
